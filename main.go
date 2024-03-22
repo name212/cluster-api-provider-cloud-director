@@ -76,7 +76,6 @@ func main() {
 
 	var useKubernetesHostEnvAsControlPlaneHost bool
 	var useNormalVMsCreationInsteadTKG bool
-	var resizeDiskBeforeNetworkReconciliation bool
 	var passHostnameByGuestInfo bool
 	var defaultNetworkModeForNewVM string
 
@@ -96,8 +95,6 @@ func main() {
 		"Use KUBERNETES_SERVICE_HOST env as control plane host")
 	flag.BoolVar(&useNormalVMsCreationInsteadTKG, "use-normal-vms-creation-instead-tkg", false,
 		"Use normal VMs creation instead TKG vm")
-	flag.BoolVar(&resizeDiskBeforeNetworkReconciliation, "resize-disk-before-network-reconciliation", false,
-		"Resizing vm root disk before network reconciliation")
 	flag.BoolVar(&passHostnameByGuestInfo, "pass-hostname-by-guest-info", false,
 		"Pass hostname to vm by guest info")
 	flag.StringVar(&defaultNetworkModeForNewVM, "default-network-mode-for-new-vm", "POOL",
@@ -144,10 +141,9 @@ func main() {
 	ctx := context.Background()
 
 	mrParams := controllers.VCDMachineReconcilerParams{
-		UseNormalVms:                          useNormalVMsCreationInsteadTKG,
-		ResizeDiskBeforeNetworkReconciliation: resizeDiskBeforeNetworkReconciliation,
-		PassHostnameByGuestInfo:               passHostnameByGuestInfo,
-		DefaultNetworkModeForNewVM:            defaultNetworkModeForNewVM,
+		UseNormalVms:               useNormalVMsCreationInsteadTKG,
+		PassHostnameByGuestInfo:    passHostnameByGuestInfo,
+		DefaultNetworkModeForNewVM: defaultNetworkModeForNewVM,
 	}
 
 	setupLog.Info(fmt.Sprintf("Machine reconciler params %+v", mrParams))

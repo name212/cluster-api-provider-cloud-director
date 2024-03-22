@@ -100,10 +100,6 @@ type VCDMachineReconcilerParams struct {
 	// UseNormalVms
 	// in third party installations needs to use 'Normal' vmware vms instead of TGK vms
 	UseNormalVms bool
-	// ResizeDiskBeforeNetworkReconciliation
-	// When vm network will bootstrap by cloud init (in DHCP mode) it be able to bootstrap slowly
-	// because vm using default small size disc with small IOPS, and we should resize disc before reconcile networks
-	ResizeDiskBeforeNetworkReconciliation bool
 	// PassHostnameByGuestInfo
 	// When wm will be bootstrapped by third party cloud-init script it may require set hostname before
 	// running the script by GuestInfo
@@ -112,7 +108,17 @@ type VCDMachineReconcilerParams struct {
 	// DefaultNetworkModeForNewVM
 	// default network mode for new VM used in func getNetworkConnection
 	// in some cases POOL is not good choice
+	// for DHCP mode bootstrap order will be changed:
+	// - create vm in the cloud
+	// - resize root disk for speed up getting IP procedure
+	//   default disk size can have small IOPS and botstrapping will be very slow
+	// - running VM. VM will get IP address after first booting
+	// - reconcile
 	DefaultNetworkModeForNewVM string
+}
+
+func (v *VCDMachineReconcilerParams) UseDHCP() bool {
+	return v.DefaultNetworkModeForNewVM == "DHCP"
 }
 
 // VCDMachineReconciler reconciles a VCDMachine object
@@ -817,12 +823,7 @@ func (r *VCDMachineReconciler) reconcileVAppCreation(ctx context.Context, vcdCli
 	return ctrl.Result{}, nil
 }
 
-func (r *VCDMachineReconciler) reconcileVM(
-	ctx context.Context, vcdClient *vcdsdk.Client, vdcManager *vcdsdk.VdcManager,
-	vApp *govcd.VApp, machine *clusterv1.Machine, vcdMachine *infrav1beta3.VCDMachine,
-	vmName string, ovdcNetworkName string,
-	vcdCluster *infrav1beta3.VCDCluster) (res ctrl.Result, vm *govcd.VM, machineAddress string, retErr error) {
-
+func (r *VCDMachineReconciler) reconcileVM(ctx context.Context, vcdClient *vcdsdk.Client, vdcManager *vcdsdk.VdcManager, vApp *govcd.VApp, machine *clusterv1.Machine, vcdMachine *infrav1beta3.VCDMachine, vmName string, ovdcNetworkName string, vcdCluster *infrav1beta3.VCDCluster, bootstrapFunc func(ctx context.Context, vm *govcd.VM) (ctrl.Result, error)) (res ctrl.Result, vm *govcd.VM, machineAddress string, retErr error) {
 	if vApp == nil || vApp.VApp == nil {
 		return ctrl.Result{}, nil, "", errors.New("reconcileVM is called with nil vApp")
 	}
@@ -944,11 +945,16 @@ shutdown -r now
 		return ctrl.Result{}, nil
 	}
 
-	if r.Params.ResizeDiskBeforeNetworkReconciliation {
+	if r.Params.UseDHCP() {
 		log.Info("Resize hard disk before starting VM")
 		res, err := resizeHardDisk(vm, vcdMachine)
 		if err != nil {
-			return res, nil, "", errors.Wrapf(err, "Cannot resize hard disk")
+			return res, nil, "", errors.Wrapf(err, "Cannot resize root disk")
+		}
+
+		res, err = bootstrapFunc(ctx, vm)
+		if err != nil {
+			return res, nil, "", errors.Wrapf(err, "Cannot bootstrap VM")
 		}
 	}
 
@@ -1004,7 +1010,7 @@ shutdown -r now
 		},
 	}
 
-	if !r.Params.ResizeDiskBeforeNetworkReconciliation {
+	if !r.Params.UseDHCP() {
 		log.Info("Resize hard disk after starting VM")
 		res, err := resizeHardDisk(vm, vcdMachine)
 		if err != nil {
@@ -1216,8 +1222,21 @@ func (r *VCDMachineReconciler) reconcileNormal(ctx context.Context, cluster *clu
 	}
 	log.Info(fmt.Sprintf("Using VM name [%s] in VApp [%s] for the machine [%s]", vmName, vAppName, machine.Name))
 
+	bootstrapData, bootstrapFormat, isInitialControlPlane, isResizedControlPlane, err := r.reconcileNodeSetupScripts(
+		ctx, vcdClient, machine, cluster, vcdMachine, vcdCluster, vAppName, vmName, skipRDEEventUpdates)
+
+	bootstrapFunc := func(ctx context.Context, vm *govcd.VM) (ctrl.Result, error) {
+		err = r.reconcileVMBootstrap(ctx, vcdClient, vdcManager, vApp, vm, vmName, bootstrapData, bootstrapFormat, vcdCluster, machine,
+			isInitialControlPlane, isResizedControlPlane, skipRDEEventUpdates)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed to bootstrap VM [%s/%s]", vAppName, vmName)
+		}
+
+		return ctrl.Result{}, nil
+	}
+
 	result, vm, machineAddress, err := r.reconcileVM(ctx, vcdClient, vdcManager, vApp, machine, vcdMachine,
-		vmName, ovdcNetworkName, vcdCluster)
+		vmName, ovdcNetworkName, vcdCluster, bootstrapFunc)
 	if err != nil {
 		capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineError, "", machine.Name, fmt.Sprintf("%v", err))
 		return result, errors.Wrapf(err, "unable to provision infrastructure for VM [%s/%s] in ovdc[%s] with network [%s]",
@@ -1245,9 +1264,6 @@ func (r *VCDMachineReconciler) reconcileNormal(ctx context.Context, cluster *clu
 	}
 	conditions.MarkTrue(vcdMachine, ContainerProvisionedCondition)
 
-	bootstrapData, bootstrapFormat, isInitialControlPlane, isResizedControlPlane, err := r.reconcileNodeSetupScripts(
-		ctx, vcdClient, machine, cluster, vcdMachine, vcdCluster, vAppName, vmName, skipRDEEventUpdates)
-
 	gateway, err := vcdsdk.NewGatewayManager(ctx, vcdClient, ovdcNetworkName, vcdCluster.Spec.LoadBalancerConfigSpec.VipSubnet, ovdcName)
 	if err != nil {
 		capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineCreationError, "", machine.Name, fmt.Sprintf("%v", err))
@@ -1266,10 +1282,11 @@ func (r *VCDMachineReconciler) reconcileNormal(ctx context.Context, cluster *clu
 		}
 	}
 
-	err = r.reconcileVMBootstrap(ctx, vcdClient, vdcManager, vApp, vm, vmName, bootstrapData, bootstrapFormat, vcdCluster, machine,
-		isInitialControlPlane, isResizedControlPlane, skipRDEEventUpdates)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to bootstrap VM [%s/%s]", vAppName, vmName)
+	if !r.Params.UseDHCP() {
+		res, err := bootstrapFunc(ctx, vm)
+		if err != nil {
+			return res, errors.Wrapf(err, "Cannot bootstrap VM")
+		}
 	}
 
 	// Update load-balancer pool with the IP of the control plane node as a new member.
@@ -1434,7 +1451,6 @@ OUTER:
 }
 
 func getNetworkConnection(connections *types.NetworkConnectionSection, ovdcNetwork string, defaultMode string, log logr.Logger) *types.NetworkConnection {
-
 	for _, existingConnection := range connections.NetworkConnection {
 		if existingConnection.Network == ovdcNetwork {
 			log.V(3).Info(fmt.Sprintf("Found network %+v", existingConnection))
