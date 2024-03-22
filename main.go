@@ -143,14 +143,18 @@ func main() {
 
 	ctx := context.Background()
 
+	mrParams := controllers.VCDMachineReconcilerParams{
+		UseNormalVms:                          useNormalVMsCreationInsteadTKG,
+		ResizeDiskBeforeNetworkReconciliation: resizeDiskBeforeNetworkReconciliation,
+		PassHostnameByGuestInfo:               passHostnameByGuestInfo,
+		DefaultNetworkModeForNewVM:            defaultNetworkModeForNewVM,
+	}
+
+	setupLog.Info(fmt.Sprintf("Machine reconciler params %+v", mrParams))
+
 	if err = (&controllers.VCDMachineReconciler{
 		Client: mgr.GetClient(),
-		Params: controllers.VCDMachineReconcilerParams{
-			UseNormalVms:                          useNormalVMsCreationInsteadTKG,
-			ResizeDiskBeforeNetworkReconciliation: resizeDiskBeforeNetworkReconciliation,
-			PassHostnameByGuestInfo:               passHostnameByGuestInfo,
-			DefaultNetworkModeForNewVM:            defaultNetworkModeForNewVM,
-		},
+		Params: mrParams,
 	}).SetupWithManager(ctx, mgr, controller.Options{
 		MaxConcurrentReconciles: concurrency,
 	}); err != nil {

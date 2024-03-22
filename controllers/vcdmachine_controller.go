@@ -956,7 +956,7 @@ shutdown -r now
 	if vcdMachine.Spec.ExtraOvdcNetworks != nil {
 		desiredNetworks = append([]string{ovdcNetworkName}, vcdMachine.Spec.ExtraOvdcNetworks...)
 	}
-	if err = r.reconcileVMNetworks(vdcManager, vApp, vm, desiredNetworks); err != nil {
+	if err = r.reconcileVMNetworks(vdcManager, vApp, vm, desiredNetworks, log); err != nil {
 		log.Error(err, "Error while attaching networks to vApp and VMs")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil, "", nil
 	}
@@ -1377,7 +1377,7 @@ func getPrimaryNetwork(vm *types.Vm) *types.NetworkConnection {
 
 // reconcileVMNetworks ensures that desired networks are attached to VMs
 // networks[0] refers the primary network
-func (r *VCDMachineReconciler) reconcileVMNetworks(vdcManager *vcdsdk.VdcManager, vApp *govcd.VApp, vm *govcd.VM, networks []string) error {
+func (r *VCDMachineReconciler) reconcileVMNetworks(vdcManager *vcdsdk.VdcManager, vApp *govcd.VApp, vm *govcd.VM, networks []string, log logr.Logger) error {
 	connections, err := vm.GetNetworkConnectionSection()
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get attached networks to VM")
@@ -1391,7 +1391,7 @@ func (r *VCDMachineReconciler) reconcileVMNetworks(vdcManager *vcdsdk.VdcManager
 			return errors.Wrapf(err, "Error ensuring network [%s] is attached to vApp", ovdcNetwork)
 		}
 
-		desiredConnectionArray[index] = getNetworkConnection(connections, ovdcNetwork, r.Params.DefaultNetworkModeForNewVM)
+		desiredConnectionArray[index] = getNetworkConnection(connections, ovdcNetwork, r.Params.DefaultNetworkModeForNewVM, log)
 	}
 
 	if !containsTheSameElements(connections.NetworkConnection, desiredConnectionArray) {
@@ -1433,21 +1433,25 @@ OUTER:
 	return true
 }
 
-func getNetworkConnection(connections *types.NetworkConnectionSection, ovdcNetwork string, defaultMode string) *types.NetworkConnection {
+func getNetworkConnection(connections *types.NetworkConnectionSection, ovdcNetwork string, defaultMode string, log logr.Logger) *types.NetworkConnection {
 
 	for _, existingConnection := range connections.NetworkConnection {
 		if existingConnection.Network == ovdcNetwork {
+			log.V(3).Info(fmt.Sprintf("Found network %+v", existingConnection))
 			return existingConnection
 		}
 	}
-
-	return &types.NetworkConnection{
+	res := &types.NetworkConnection{
 		Network:                 ovdcNetwork,
 		NeedsCustomization:      false,
 		IsConnected:             true,
 		IPAddressAllocationMode: defaultMode,
 		NetworkAdapterType:      "VMXNET3",
 	}
+
+	log.V(2).Info(fmt.Sprintf("Network not found. Use default %+v", res))
+
+	return res
 }
 
 func ensureNetworkIsAttachedToVApp(vdcManager *vcdsdk.VdcManager, vApp *govcd.VApp, ovdcNetworkName string) error {
