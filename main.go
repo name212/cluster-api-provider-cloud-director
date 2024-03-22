@@ -149,6 +149,7 @@ func main() {
 			UseNormalVms:                          useNormalVMsCreationInsteadTKG,
 			ResizeDiskBeforeNetworkReconciliation: resizeDiskBeforeNetworkReconciliation,
 			PassHostnameByGuestInfo:               passHostnameByGuestInfo,
+			DefaultNetworkModeForNewVM:            defaultNetworkModeForNewVM,
 		},
 	}).SetupWithManager(ctx, mgr, controller.Options{
 		MaxConcurrentReconciles: concurrency,
