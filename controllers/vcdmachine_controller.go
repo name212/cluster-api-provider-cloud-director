@@ -268,6 +268,8 @@ var postCustPhases = []string{
 	ProxyConfiguration,
 }
 
+const debugLevel = 3
+
 func removeFromSlice(remove string, arr []string) []string {
 	for ind, str := range arr {
 		if str == remove {
@@ -408,34 +410,38 @@ func (r *VCDMachineReconciler) reconcileNodeSetupScripts(ctx context.Context, vc
 	var bootstrapData string
 	var bootstrapDataBytes []byte
 	if bootstrapFormat == BootstrapFormatCloudConfig {
-		// Construct a CloudInitScriptInput struct to pass into template.Execute() function to generate the necessary
-		// cloud init script for the relevant node type, i.e. control plane or worker node
-		cloudInitInput := CloudInitScriptInput{
-			HTTPProxy:           vcdCluster.Spec.ProxyConfigSpec.HTTPProxy,
-			HTTPSProxy:          vcdCluster.Spec.ProxyConfigSpec.HTTPSProxy,
-			NoProxy:             vcdCluster.Spec.ProxyConfigSpec.NoProxy,
-			MachineName:         vmName,
-			VcdHostFormatted:    strings.ReplaceAll(vcdCluster.Spec.Site, "/", "\\/"),
-			NvidiaGPU:           false,
-			TKGVersion:          getTKGVersion(cluster),    // needed for both worker & control plane machines for metering
-			ClusterID:           vcdCluster.Status.InfraId, // needed for both worker & control plane machines for metering
-			ResizedControlPlane: isResizedControlPlane,
-		}
-		if !vcdMachine.Spec.Bootstrapped && isInitialControlPlane {
-			cloudInitInput.ControlPlane = true
-		}
+		log.V(debugLevel).Info("Process cloud config")
+		if !r.Params.SkipPostBootstrapPhasesChecking {
+			// Construct a CloudInitScriptInput struct to pass into template.Execute() function to generate the necessary
+			// cloud init script for the relevant node type, i.e. control plane or worker node
+			cloudInitInput := CloudInitScriptInput{
+				HTTPProxy:           vcdCluster.Spec.ProxyConfigSpec.HTTPProxy,
+				HTTPSProxy:          vcdCluster.Spec.ProxyConfigSpec.HTTPSProxy,
+				NoProxy:             vcdCluster.Spec.ProxyConfigSpec.NoProxy,
+				MachineName:         vmName,
+				VcdHostFormatted:    strings.ReplaceAll(vcdCluster.Spec.Site, "/", "\\/"),
+				NvidiaGPU:           false,
+				TKGVersion:          getTKGVersion(cluster),    // needed for both worker & control plane machines for metering
+				ClusterID:           vcdCluster.Status.InfraId, // needed for both worker & control plane machines for metering
+				ResizedControlPlane: isResizedControlPlane,
+			}
+			if !vcdMachine.Spec.Bootstrapped && isInitialControlPlane {
+				cloudInitInput.ControlPlane = true
+			}
 
-		bootstrapDataBytes, err = MergeJinjaToCloudInitScript(cloudInitInput, bootstrapJinjaScript)
-		if err != nil {
-			capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptGenerationError, "", machine.Name, fmt.Sprintf("%v", err))
+			log.V(debugLevel).Info("starting MergeJinjaToCloudInitScript")
+			bootstrapDataBytes, err = MergeJinjaToCloudInitScript(cloudInitInput, bootstrapJinjaScript)
+			if err != nil {
+				capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptGenerationError, "", machine.Name, fmt.Sprintf("%v", err))
 
-			return nil, bootstrapFormat, isInitialControlPlane, isResizedControlPlane, errors.Wrapf(err,
-				"Error merging bootstrap jinja script with the cloudInit script for [%s/%s] [%s]",
-				vAppName, machine.Name, bootstrapJinjaScript)
+				return nil, bootstrapFormat, isInitialControlPlane, isResizedControlPlane, errors.Wrapf(err,
+					"Error merging bootstrap jinja script with the cloudInit script for [%s/%s] [%s]",
+					vAppName, machine.Name, bootstrapJinjaScript)
+			}
 		}
-
 		bootstrapData = string(bootstrapDataBytes)
 	} else if bootstrapFormat == BootstrapFormatIgnition {
+		log.V(2).Info("Process ignition")
 		bootstrapDataBytes = []byte(bootstrapJinjaScript)
 		bootstrapData = bootstrapJinjaScript
 	} else {
@@ -466,6 +472,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 	capvcdRdeManager := capisdk.NewCapvcdRdeManager(vcdClient, vcdCluster.Status.InfraId)
 
 	vmStatus, err := vm.GetStatus()
+	log.V(debugLevel).Info(fmt.Sprintf("Vm status %s", vmStatus))
 	if err != nil {
 		capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineCreationError, "", machine.Name, fmt.Sprintf("%v", err))
 
@@ -499,6 +506,8 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 				keyVals["guestinfo.metadata.encoding"] = "base64"
 				keyVals["guestinfo.hostname"] = vmName
 			}
+			log.V(debugLevel).Info(fmt.Sprintf("Vm extra keys for cloud config: %+v", keyVals))
+
 		} else if bootstrapFormat == BootstrapFormatIgnition {
 			networkMetadata, err := generateNetworkInitializationScriptForIgnition(vm.VM.NetworkConnectionSection, vdcManager)
 			if err != nil {
@@ -516,6 +525,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 		}
 
 		keys := capvcdutil.Keys(keyVals)
+		log.V(debugLevel).Info("Start SetMultiVmExtraConfigKeyValuePairs")
 		task, err := vdcManager.SetMultiVmExtraConfigKeyValuePairs(vm, keyVals, true)
 		if err != nil {
 			capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineCreationError, "", machine.Name, fmt.Sprintf("%v", err))
@@ -529,6 +539,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 			return errors.Wrapf(err, "Error while waiting for task that sets keys [%v] machine [%s/%s]",
 				keys, vAppName, vm.VM.Name)
 		}
+		log.V(debugLevel).Info("finish SetMultiVmExtraConfigKeyValuePairs")
 		err = capvcdRdeManager.RdeManager.RemoveErrorByNameOrIdFromErrorSet(ctx, vcdsdk.ComponentCAPVCD, capisdk.VCDMachineCreationError, "", machine.Name)
 		if err != nil {
 			log.Error(err, "failed to remove VCDMachineCreationError from RDE", "rdeID", vcdCluster.Status.InfraId)
@@ -860,11 +871,12 @@ func (r *VCDMachineReconciler) reconcileVM(ctx context.Context, vcdClient *vcdsd
 			// By default vcloud director supports 2 cloud-init datasources - OVF and Vmware.
 			// In standard distros cloud-init checks OVF datasource first.
 			// CAPSVCD only passes arguments to Vmware cloud-init, so we need to modify cloud-init datasource order and reboot node to apply cloud-init changes.
-			guestCustScript := `#!/usr/bin/env bash
-cat > /etc/cloud/cloud.cfg.d/98-cse-vmware-datasource.cfg <<EOF
-datasource_list: [ "VMware" ]
-EOF
-`
+			//			guestCustScript := `#!/usr/bin/env bash
+			//cat > /etc/cloud/cloud.cfg.d/98-cse-vmware-datasource.cfg <<EOF
+			//datasource_list: [ "VMware" ]
+			//EOF
+			//`
+			guestCustScript := ""
 			task, err = vdcManager.AddNewVM(vmName, vAppName,
 				vcdMachine.Spec.Catalog, vcdMachine.Spec.Template, vcdMachine.Spec.PlacementPolicy,
 				vcdMachine.Spec.SizingPolicy, vcdMachine.Spec.StorageProfile, guestCustScript)
