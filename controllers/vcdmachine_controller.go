@@ -410,7 +410,7 @@ func (r *VCDMachineReconciler) reconcileNodeSetupScripts(ctx context.Context, vc
 	var bootstrapData string
 	var bootstrapDataBytes []byte
 	if bootstrapFormat == BootstrapFormatCloudConfig {
-		log.V(debugLevel).Info("Process cloud config")
+		log.Info("Process cloud config")
 		if !r.Params.SkipPostBootstrapPhasesChecking {
 			// Construct a CloudInitScriptInput struct to pass into template.Execute() function to generate the necessary
 			// cloud init script for the relevant node type, i.e. control plane or worker node
@@ -429,7 +429,7 @@ func (r *VCDMachineReconciler) reconcileNodeSetupScripts(ctx context.Context, vc
 				cloudInitInput.ControlPlane = true
 			}
 
-			log.V(debugLevel).Info("starting MergeJinjaToCloudInitScript")
+			log.Info("starting MergeJinjaToCloudInitScript")
 			bootstrapDataBytes, err = MergeJinjaToCloudInitScript(cloudInitInput, bootstrapJinjaScript)
 			if err != nil {
 				capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptGenerationError, "", machine.Name, fmt.Sprintf("%v", err))
@@ -472,7 +472,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 	capvcdRdeManager := capisdk.NewCapvcdRdeManager(vcdClient, vcdCluster.Status.InfraId)
 
 	vmStatus, err := vm.GetStatus()
-	log.V(debugLevel).Info(fmt.Sprintf("Vm status %s", vmStatus))
+	log.Info(fmt.Sprintf("Vm status %s", vmStatus))
 	if err != nil {
 		capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineCreationError, "", machine.Name, fmt.Sprintf("%v", err))
 
@@ -491,6 +491,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 	if vmStatus != "POWERED_ON" {
 		// try to power on the VM
 		b64BootstrapData := b64.StdEncoding.EncodeToString([]byte(bootstrapData))
+		log.Info(fmt.Sprintf("Vm status is %s. Bootstrap format %s", vmStatus, bootstrapFormat))
 
 		var keyVals map[string]string
 		if bootstrapFormat == BootstrapFormatCloudConfig {
@@ -506,7 +507,8 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 				keyVals["guestinfo.metadata.encoding"] = "base64"
 				keyVals["guestinfo.hostname"] = vmName
 			}
-			log.V(debugLevel).Info(fmt.Sprintf("Vm extra keys for cloud config: %+v", keyVals))
+
+			log.Info(fmt.Sprintf("Vm extra keys for cloud config: %+v", keyVals))
 
 		} else if bootstrapFormat == BootstrapFormatIgnition {
 			networkMetadata, err := generateNetworkInitializationScriptForIgnition(vm.VM.NetworkConnectionSection, vdcManager)
@@ -525,7 +527,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 		}
 
 		keys := capvcdutil.Keys(keyVals)
-		log.V(debugLevel).Info("Start SetMultiVmExtraConfigKeyValuePairs")
+		log.Info("Start SetMultiVmExtraConfigKeyValuePairs")
 		task, err := vdcManager.SetMultiVmExtraConfigKeyValuePairs(vm, keyVals, true)
 		if err != nil {
 			capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineCreationError, "", machine.Name, fmt.Sprintf("%v", err))
@@ -539,7 +541,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 			return errors.Wrapf(err, "Error while waiting for task that sets keys [%v] machine [%s/%s]",
 				keys, vAppName, vm.VM.Name)
 		}
-		log.V(debugLevel).Info("finish SetMultiVmExtraConfigKeyValuePairs")
+		log.Info("finish SetMultiVmExtraConfigKeyValuePairs")
 		err = capvcdRdeManager.RdeManager.RemoveErrorByNameOrIdFromErrorSet(ctx, vcdsdk.ComponentCAPVCD, capisdk.VCDMachineCreationError, "", machine.Name)
 		if err != nil {
 			log.Error(err, "failed to remove VCDMachineCreationError from RDE", "rdeID", vcdCluster.Status.InfraId)
