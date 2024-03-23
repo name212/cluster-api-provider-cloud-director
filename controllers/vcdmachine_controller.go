@@ -864,7 +864,6 @@ func (r *VCDMachineReconciler) reconcileVM(ctx context.Context, vcdClient *vcdsd
 cat > /etc/cloud/cloud.cfg.d/98-cse-vmware-datasource.cfg <<EOF
 datasource_list: [ "VMware" ]
 EOF
-shutdown -r now
 `
 			task, err = vdcManager.AddNewVM(vmName, vAppName,
 				vcdMachine.Spec.Catalog, vcdMachine.Spec.Template, vcdMachine.Spec.PlacementPolicy,
