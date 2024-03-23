@@ -438,8 +438,11 @@ func (r *VCDMachineReconciler) reconcileNodeSetupScripts(ctx context.Context, vc
 					"Error merging bootstrap jinja script with the cloudInit script for [%s/%s] [%s]",
 					vAppName, machine.Name, bootstrapJinjaScript)
 			}
+			bootstrapData = string(bootstrapDataBytes)
+		} else {
+			bootstrapData = bootstrapJinjaScript
+			bootstrapDataBytes = []byte(bootstrapData)
 		}
-		bootstrapData = string(bootstrapDataBytes)
 	} else if bootstrapFormat == BootstrapFormatIgnition {
 		log.V(2).Info("Process ignition")
 		bootstrapDataBytes = []byte(bootstrapJinjaScript)
