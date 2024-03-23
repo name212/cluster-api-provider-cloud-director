@@ -864,29 +864,11 @@ func (r *VCDMachineReconciler) reconcileVM(ctx context.Context, vcdClient *vcdsd
 	}
 	if !vmExists {
 		log.Info("Adding infra VM for the machine")
-		var task govcd.Task
-		var err error
-		if r.Params.UseNormalVms {
-			log.Info("Using normal VM")
-			// By default vcloud director supports 2 cloud-init datasources - OVF and Vmware.
-			// In standard distros cloud-init checks OVF datasource first.
-			// CAPSVCD only passes arguments to Vmware cloud-init, so we need to modify cloud-init datasource order and reboot node to apply cloud-init changes.
-			//			guestCustScript := `#!/usr/bin/env bash
-			//cat > /etc/cloud/cloud.cfg.d/98-cse-vmware-datasource.cfg <<EOF
-			//datasource_list: [ "VMware" ]
-			//EOF
-			//`
-			guestCustScript := ""
-			task, err = vdcManager.AddNewVM(vmName, vAppName,
-				vcdMachine.Spec.Catalog, vcdMachine.Spec.Template, vcdMachine.Spec.PlacementPolicy,
-				vcdMachine.Spec.SizingPolicy, vcdMachine.Spec.StorageProfile, guestCustScript)
-		} else {
-			log.Info("Using TGK VM")
-			// vcda-4391 fixed
-			task, err = vdcManager.AddNewTkgVM(vmName, vAppName,
-				vcdMachine.Spec.Catalog, vcdMachine.Spec.Template, vcdMachine.Spec.PlacementPolicy,
-				vcdMachine.Spec.SizingPolicy, vcdMachine.Spec.StorageProfile)
-		}
+
+		// vcda-4391 fixed
+		task, err := vdcManager.AddNewTkgVM(vmName, vAppName,
+			vcdMachine.Spec.Catalog, vcdMachine.Spec.Template, vcdMachine.Spec.PlacementPolicy,
+			vcdMachine.Spec.SizingPolicy, vcdMachine.Spec.StorageProfile)
 		if err != nil {
 			capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineCreationError, "", machine.Name,
 				fmt.Sprintf("%v", err))
