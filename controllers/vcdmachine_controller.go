@@ -491,7 +491,7 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 	if vmStatus != "POWERED_ON" {
 		// try to power on the VM
 		b64BootstrapData := b64.StdEncoding.EncodeToString(bootstrapData)
-		log.Info(fmt.Sprintf("Vm status is %s. Bootstrap format %s; Bootstrap data %s; b64: %s", vmStatus, bootstrapFormat, string(bootstrapData)), b64BootstrapData)
+		log.Info(fmt.Sprintf("Vm status is %s. Bootstrap format %s; Bootstrap data %s; b64: %s", vmStatus, bootstrapFormat, string(bootstrapData), b64BootstrapData))
 
 		var keyVals map[string]string
 		if bootstrapFormat == BootstrapFormatCloudConfig {
