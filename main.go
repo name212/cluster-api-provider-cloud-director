@@ -77,6 +77,7 @@ func main() {
 	var useKubernetesHostEnvAsControlPlaneHost bool
 	var useNormalVMsCreationInsteadTKG bool
 	var passHostnameByGuestInfo bool
+	var skipPostBootstrapPhasesChecking bool
 	var defaultNetworkModeForNewVM string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -97,6 +98,8 @@ func main() {
 		"Use normal VMs creation instead TKG vm")
 	flag.BoolVar(&passHostnameByGuestInfo, "pass-hostname-by-guest-info", false,
 		"Pass hostname to vm by guest info")
+	flag.BoolVar(&skipPostBootstrapPhasesChecking, "skip-post-bootstrap-phases-checking", false,
+		"Skip post bootstrap checking for cloud init bootstrap script")
 	flag.StringVar(&defaultNetworkModeForNewVM, "default-network-mode-for-new-vm", "POOL",
 		"The default network mode for new VM. Can be: POOL (default), DHCP, MANUAL")
 
@@ -141,9 +144,10 @@ func main() {
 	ctx := context.Background()
 
 	mrParams := controllers.VCDMachineReconcilerParams{
-		UseNormalVms:               useNormalVMsCreationInsteadTKG,
-		PassHostnameByGuestInfo:    passHostnameByGuestInfo,
-		DefaultNetworkModeForNewVM: defaultNetworkModeForNewVM,
+		UseNormalVms:                    useNormalVMsCreationInsteadTKG,
+		PassHostnameByGuestInfo:         passHostnameByGuestInfo,
+		DefaultNetworkModeForNewVM:      defaultNetworkModeForNewVM,
+		SkipPostBootstrapPhasesChecking: skipPostBootstrapPhasesChecking,
 	}
 
 	setupLog.Info(fmt.Sprintf("Machine reconciler params %+v", mrParams))

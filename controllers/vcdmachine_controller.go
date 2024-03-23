@@ -115,6 +115,10 @@ type VCDMachineReconcilerParams struct {
 	// - running VM. VM will get IP address after first booting
 	// - reconcile
 	DefaultNetworkModeForNewVM string
+
+	// SkipPostBootstrapPhasesChecking
+	// skip all checks for cloud-init scripts
+	SkipPostBootstrapPhasesChecking bool
 }
 
 func (v *VCDMachineReconcilerParams) UseDHCP() bool {
@@ -563,35 +567,37 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 		log.Error(err, "failed to remove VCDMachineCreationError from RDE", "rdeID", vcdCluster.Status.InfraId)
 	}
 
-	if bootstrapFormat == BootstrapFormatCloudConfig {
-		phases := postCustPhases
-		if isInitialControlPlane {
-			phases = append(phases, KubeadmInit)
-		} else {
-			phases = append(phases, KubeadmNodeJoin)
-		}
-
-		if vcdCluster.Spec.ProxyConfigSpec.HTTPSProxy == "" &&
-			vcdCluster.Spec.ProxyConfigSpec.HTTPProxy == "" {
-			phases = removeFromSlice(ProxyConfiguration, phases)
-		}
-
-		for _, phase := range phases {
-			if err = vApp.Refresh(); err != nil {
-				capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
-
-				return errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to refresh vapp",
-					vAppName, vm.VM.Name)
+	if !r.Params.SkipPostBootstrapPhasesChecking {
+		if bootstrapFormat == BootstrapFormatCloudConfig {
+			phases := postCustPhases
+			if isInitialControlPlane {
+				phases = append(phases, KubeadmInit)
+			} else {
+				phases = append(phases, KubeadmNodeJoin)
 			}
-			log.Info(fmt.Sprintf("Start: waiting for the bootstrapping phase [%s] to complete", phase))
-			if err = r.waitForPostCustomizationPhase(ctx, vcdClient, vm, phase); err != nil {
-				log.Error(err, fmt.Sprintf("Error waiting for the bootstrapping phase [%s] to complete", phase))
-				capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
 
-				return errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to wait for post customization phase [%s]",
-					vAppName, vm.VM.Name, phase)
+			if vcdCluster.Spec.ProxyConfigSpec.HTTPSProxy == "" &&
+				vcdCluster.Spec.ProxyConfigSpec.HTTPProxy == "" {
+				phases = removeFromSlice(ProxyConfiguration, phases)
 			}
-			log.Info(fmt.Sprintf("End: waiting for the bootstrapping phase [%s] to complete", phase))
+
+			for _, phase := range phases {
+				if err = vApp.Refresh(); err != nil {
+					capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
+
+					return errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to refresh vapp",
+						vAppName, vm.VM.Name)
+				}
+				log.Info(fmt.Sprintf("Start: waiting for the bootstrapping phase [%s] to complete", phase))
+				if err = r.waitForPostCustomizationPhase(ctx, vcdClient, vm, phase); err != nil {
+					log.Error(err, fmt.Sprintf("Error waiting for the bootstrapping phase [%s] to complete", phase))
+					capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
+
+					return errors.Wrapf(err, "Error while bootstrapping the machine [%s/%s]; unable to wait for post customization phase [%s]",
+						vAppName, vm.VM.Name, phase)
+				}
+				log.Info(fmt.Sprintf("End: waiting for the bootstrapping phase [%s] to complete", phase))
+			}
 		}
 	}
 
