@@ -555,10 +555,12 @@ func (r *VCDMachineReconciler) reconcileVMBootstrap(ctx context.Context, vcdClie
 		}
 	}
 
-	if hasCloudInitFailedBefore, err := r.hasCloudInitExecutionFailedBefore(vcdClient, vm); hasCloudInitFailedBefore {
-		capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
+	if !r.Params.SkipPostBootstrapPhasesChecking {
+		if hasCloudInitFailedBefore, err := r.hasCloudInitExecutionFailedBefore(vcdClient, vm); hasCloudInitFailedBefore {
+			capvcdRdeManager.AddToErrorSet(ctx, capisdk.VCDMachineScriptExecutionError, "", machine.Name, fmt.Sprintf("%v", err))
 
-		return errors.Wrapf(err, "Error bootstrapping the machine [%s/%s]; machine is probably in unreconciliable state", vAppName, vm.VM.Name)
+			return errors.Wrapf(err, "Error bootstrapping the machine [%s/%s]; machine is probably in unreconciliable state", vAppName, vm.VM.Name)
+		}
 	}
 	capvcdRdeManager.AddToEventSet(ctx, capisdk.InfraVmPoweredOn, "", machine.Name, "", skipRDEEventUpdates)
 
